@@ -512,6 +512,11 @@ main (int argc, char **argv)
              *  to do table/row filtering.
              */
             strcpy (ifname, *iflist);
+            if (access (ifname, F_OK) < 0) {
+                fprintf (stderr, "Error: Cannot access file '%s'\n", ifname);
+                continue;
+            }
+
             if (extnum >= 0) {
                 memset (tmp, 0, SZ_FNAME);
                 sprintf (tmp, "%s[%d]", ifname, extnum);
@@ -1586,6 +1591,8 @@ dl_printLogical (unsigned char *dp, ColPtr col)
                 if (col->repeat > 1 && j < col->ncols)
                     *optr++ = delimiter,  olen++;
             }
+            if (col->repeat > 1 && i < col->nrows)
+                *optr++ = delimiter,  olen++;
         }
     }
 
@@ -1656,6 +1663,8 @@ dl_printByte (unsigned char *dp, ColPtr col)
                 if (col->repeat > 1 && j < col->ncols)
                     *optr++ = delimiter,  olen++;
             }
+            if (col->repeat > 1 && i < col->nrows)
+                *optr++ = delimiter,  olen++;
         }
     }
 
@@ -1724,6 +1733,8 @@ dl_printShort (unsigned char *dp, ColPtr col)
                 if (col->repeat > 1 && j < col->ncols)
                     *optr++ = delimiter,  olen++;
             }
+            if (col->repeat > 1 && i < col->nrows)
+                *optr++ = delimiter,  olen++;
         }
     }
 
@@ -1792,6 +1803,8 @@ dl_printInt (unsigned char *dp, ColPtr col)
                 if (col->repeat > 1 && j < col->ncols)
                     *optr++ = delimiter,  olen++;
             }
+            if (col->repeat > 1 && i < col->nrows)
+                *optr++ = delimiter,  olen++;
         }
     }
 
@@ -1853,6 +1866,8 @@ dl_printLong (unsigned char *dp, ColPtr col)
                 if (col->repeat > 1 && j < col->ncols)
                     *optr++ = delimiter,  olen++;
             }
+            if (col->repeat > 1 && i < col->nrows)
+                *optr++ = delimiter,  olen++;
         }
     }
 
@@ -1941,6 +1956,8 @@ dl_printFloat (unsigned char *dp, ColPtr col)
                 if (col->repeat > 1 && j < col->ncols)
                     *optr++ = delimiter,  olen++;
             }
+            if (col->repeat > 1 && i < col->nrows)
+                *optr++ = delimiter,  olen++;
         }
     }
 
@@ -1989,23 +2006,48 @@ dl_printDouble (unsigned char *dp, ColPtr col)
             for (j=1; j <= col->ncols; j++) {
                 memset (valbuf, 0, 64 * col->repeat);
                 memcpy (&dval, dp, sizeof(double));
-                if (! isnan (dval) ) {
-                    if (format == TAB_IPAC)
-                        sprintf (valbuf, "%*lf", col->dispwidth, dval);
-                    else
-                        sprintf (valbuf, "%.16lf", dval);
-                    memcpy (optr, valbuf, (len = strlen (valbuf)));
-                    olen += len;
-                    optr += len;
+
+                if (isnan (dval) ) {
+                    if (format == TAB_SQLITE || format == TAB_MYSQL)
+                        memcpy (optr, "'NaN'", (len = strlen ("'NaN'")));
+                    else if (format == TAB_POSTGRES)
+                        memcpy (optr, "NaN", (len = strlen ("NaN")));
+                    else {
+                        sprintf (valbuf, "%.16lf", (double) dval);
+                        memcpy (optr, valbuf, (len = strlen (valbuf)));
+                    }
+                    olen += len, optr += len;
+
+                } else if ((sign = isinf (dval)) ) {
+                    if (format == TAB_SQLITE || format == TAB_MYSQL) {
+                        char *val = (sign ? "'Infinity'" : "'-Infinity'");
+                        memcpy (optr, val, (len = strlen (val)));
+
+                    } else if (format == TAB_POSTGRES) {
+                        char *val = (sign ? "Infinity" : "-Infinity");
+                        memcpy (optr, val, (len = strlen (val)));
+
+                    } else {
+                        sprintf (valbuf, "%.16lf", (double) dval);
+                        memcpy (optr, valbuf, (len = strlen (valbuf)));
+                    }
+                    olen += len, optr += len;
+
                 } else {
-                    memcpy (optr, "NaN", (len = strlen ("NaN")));
-                    olen += len;
-                    optr += len;
+                    if (format == TAB_IPAC)
+                        sprintf (valbuf, "%*f", col->dispwidth, (double) dval);
+                    else
+                        sprintf (valbuf, "%.16f", (double) dval);
+
+                    memcpy (optr, valbuf, (len = strlen (valbuf)));
+                    olen += len, optr += len;
                 }
                 dp += sz_double;
                 if (col->repeat > 1 && j < col->ncols)
                     *optr++ = delimiter,  olen++;
             }
+            if (col->repeat > 1 && i < col->nrows)
+                *optr++ = delimiter,  olen++;
         }
     }
 
