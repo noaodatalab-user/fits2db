@@ -1973,7 +1973,7 @@ dl_printDouble (unsigned char *dp, ColPtr col)
 {
     double dval = 0.0;
     char  valbuf[64 * col->repeat];
-    int   i, j, len = 0;
+    int   i, j, sign = 1, len = 0;
 
 
     if (mach_swap && !do_binary)
