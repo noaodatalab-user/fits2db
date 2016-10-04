@@ -12,6 +12,7 @@
  *      -n,--noop                set no-op flag
  *
  *                                   INPUT PROCESSING OPTIONS
+ *      -b,--bundle=<N>          bundle <N> files at a time
  *      -c,--chunk=<N>           process <N> rows at a time
  *      -e,--extnum=<N>          process table in FITS extension number <N>
  *      -E,--extname=<name>      process table in FITS extension name <name>
@@ -174,6 +175,7 @@ int     do_create       = 0;            // create new db table
 int     do_truncate     = 0;            // truncate db table before load
 int     do_load         = 1;            // load db table
 int     do_oids         = 0;            // use table OID (Postgres only)?
+int     bundle          = 1;            // number of input files to bundle
 int     nfiles          = 0;            // number of input files
 int     noop            = 0;            // no-op ??
 
@@ -208,13 +210,14 @@ size_t  sz_double       = sizeof (double);
 static Task  self       = {  "fits2db",  fits2db,  0,  0,  0  };
  */
 
-static char  *opts 	= "hdvnc:e:E:i:o:r:s:t:BCHNOQSXZ012345:6789:D:";
+static char  *opts 	= "hdvnbc:e:E:i:o:r:s:t:BCHNOQSXZ012345:6789:D:";
 static struct option long_opts[] = {
     { "help",         no_argument,          NULL,   'h'},
     { "debug",        no_argument,          NULL,   'd'},
     { "verbose",      no_argument,          NULL,   'v'},
     { "noop",         no_argument,          NULL,   'n'},
 
+    { "bundle",       required_argument,    NULL,   'b'},
     { "chunk",        required_argument,    NULL,   'c'},
     { "extnum",       required_argument,    NULL,   'e'},
     { "extname",      required_argument,    NULL,   'E'},
@@ -259,7 +262,8 @@ static void Usage (void);
 
 static void dl_escapeCSV (char* in);
 static void dl_quote (char* in);
-static void dl_fits2db (char *iname, char *oname, int filenum, int nfiles);
+static void dl_fits2db (char *iname, char *oname, int filenum, 
+                            int bnum, int nfiles);
 static void dl_printHdr (int firstcol, int lastcol, FILE *ofd);
 static void dl_printIPACTypes (char *tablename, fitsfile *fptr, int firstcol,
                                 int lastcol, FILE *ofd);
@@ -350,6 +354,7 @@ main (int argc, char **argv)
 	    case 'v':  verbose++;                       break;  // --verbose
 	    case 'n':  noop++;                          break;  // --noop
 
+	    case 'b':  bundle = dl_atoi (optval);	break;  // --bundle
 	    case 'c':  chunk_size = dl_atoi (optval);	break;  // --chunk_size
 	    case 'e':  extnum = dl_atoi (optval);	break;  // --extnum
 	    case 'E':  extname = strdup (optval);	break;  // --extname
@@ -489,7 +494,8 @@ main (int argc, char **argv)
 
     } else {
         char ofname[SZ_PATH], ifname[SZ_PATH];
-        int  ndigits = (int) log10 (nfiles) + 1;
+        int  ndigits = (int) log10 (nfiles) + 1, bnum = 0;;
+
 
         if (debug) {
             for (iflist=ifstart, i=0; *iflist; iflist++, i++) {
@@ -564,8 +570,12 @@ main (int argc, char **argv)
                     fprintf (stderr, "Processing file: %s\n", ifname);
 
                 if (!noop)
-                    dl_fits2db (ifname, ofname, i, nfiles);
+                    dl_fits2db (ifname, ofname, i, bnum, nfiles);
 
+                /* Increment the filenumber within the bundle so we can keep
+                 * track of headers.
+                 */
+                bnum = ((bnum+1) == bundle ? 0 : (bnum+1));
             } else
                 fprintf (stderr, "Error: Skipping non-FITS file '%s'.\n", 
                                     ifname);
@@ -601,7 +611,7 @@ main (int argc, char **argv)
  *  some ascii 'database' table like a CSV.
  */
 static void
-dl_fits2db (char *iname, char *oname, int filenum, int nfiles)
+dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
 {
     fitsfile *fptr = (fitsfile *) NULL;
     int   status = 0;
@@ -680,10 +690,6 @@ dl_fits2db (char *iname, char *oname, int filenum, int nfiles)
                     if (do_truncate)
                         fprintf (ofd, "TRUNCATE TABLE %s;\n", tablename);
 
-                    //if (format != TAB_SQLITE)
-                        // For SQLite we print the header for each row.
-                        dl_printSQLHdr (tablename, fptr, firstcol, lastcol,
-                            ofd);
                 }
             } else {
                 // Make sure this file has the same columns.
@@ -703,6 +709,14 @@ dl_fits2db (char *iname, char *oname, int filenum, int nfiles)
                     fits_report_error (stderr, status);
                 return;
             }
+
+
+            /*  At the beginning of each file bundle, print the appropriate
+             *  COPY/INSERT statement.  This helps avoid memory problems in
+             *  the database clients we write to.
+             */
+            if (bnum == 0 && format != TAB_DELIMITED && format != TAB_IPAC)
+                dl_printSQLHdr (tablename, fptr, firstcol, lastcol, ofd);
 
 
             /*  Allocate the I/O buffer.
@@ -755,19 +769,18 @@ dl_fits2db (char *iname, char *oname, int filenum, int nfiles)
                     }
                 
 
-                    for (i=firstcol; i <= ncols; i++) {
+                    for (i=firstcol; i <= ncols; i++)
                         dp = dl_printCol (dp, &inColumns[i], 
                                     (i < ncols ? delimiter : '\n'));
-                    }
 
 
                     if (format == TAB_MYSQL || format == TAB_SQLITE) {
-                    //if (format == TAB_MYSQL) {
                         // Add a comma for all but the last row of a table.
                         if (j < nelem)
                             *optr++ = ',', olen++;
+
                         // Add a comma if there will be more tables to follow.
-                        if (filenum < (nfiles-1)) 
+                        else if (filenum < (nfiles-1) && bnum < (bundle-1))
                             *optr++ = ',', olen++;
                     }
 
@@ -785,7 +798,7 @@ dl_fits2db (char *iname, char *oname, int filenum, int nfiles)
 
             /*  Terminate the output stream.
              */
-            if (concat && filenum == (nfiles - 1)) {
+            if ((concat && filenum == (nfiles-1)) || bnum == (bundle-1)) {
                 if (format == TAB_POSTGRES) {
                     short  eof = -1;
                     optr = obuf, olen = 0;
@@ -1062,8 +1075,8 @@ dl_printHdr (int firstcol, int lastcol, FILE *ofd)
     ColPtr col = (ColPtr) NULL;
 
 
-    if (*omode == 'a')
-        return;
+    //if (*omode == 'a')
+    //    return;
 
     if (format == TAB_IPAC)
         fprintf (ofd, "|");
@@ -1193,7 +1206,7 @@ dl_printSQLHdr (char *tablename, fitsfile *fptr, int firstcol, int lastcol,
         char copy_buf[160];
 
         memset (copy_buf, 0, 160);
-        sprintf (copy_buf, "COPY %s FROM stdin WITH BINARY;\n", tablename);
+        sprintf (copy_buf, "\nCOPY %s FROM stdin WITH BINARY;\n", tablename);
 
         if (!noop)
             write (fileno(ofd), copy_buf, strlen(copy_buf));   // header string
@@ -1203,11 +1216,11 @@ dl_printSQLHdr (char *tablename, fitsfile *fptr, int firstcol, int lastcol,
 
     } else {
         if (format == TAB_POSTGRES) {
-            fprintf (ofd, "COPY %s (", tablename);
+            fprintf (ofd, "\nCOPY %s (", tablename);
             dl_printHdr (firstcol, lastcol, ofd);
             fprintf (ofd, ") from stdin;\n");
         } else if (format == TAB_MYSQL || format == TAB_SQLITE) {
-            fprintf (ofd, "INSERT INTO %s (", tablename);
+            fprintf (ofd, "\nINSERT INTO %s (", tablename);
             dl_printHdr (firstcol, lastcol, ofd);
             fprintf (ofd, ") VALUES\n");
         }
@@ -2611,6 +2624,7 @@ Usage (void)
 "      -n,--noop                set no-op flag\n"
 "\n"
 "                                   INPUT PROCESSING OPTIONS\n"
+"      -b,--bundle=<N>          bundle <N> files at a time\n"
 "      -c,--chunk=<N>           process <N> rows at a time\n"
 "      -e,--extnum=<N>          process table in FITS extension number <N>\n"
 "      -E,--extname=<name>      process table in FITS extension name <name>\n"
