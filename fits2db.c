@@ -789,6 +789,7 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
                             *optr++ = ',', olen++;
                     }
 
+                    if (! do_binary)
                     *optr++ = '\n', olen++;     // terminate the row
                 }
                 write (fileno(ofd), obuf, olen);
@@ -1203,15 +1204,16 @@ static void
 dl_printSQLHdr (char *tablename, fitsfile *fptr, int firstcol, int lastcol,
                     FILE *ofd)
 {
+    int   hdr_extn = 0;
+    char  copy_buf[160];
+
+
     if (! do_load)
         return;
 
     if (do_binary && format == TAB_POSTGRES) {
-        int hdr_extn = 0;
-        char copy_buf[160];
-
         memset (copy_buf, 0, 160);
-        sprintf (copy_buf, "\nCOPY %s FROM stdin WITH BINARY;\n", tablename);
+        sprintf (copy_buf, "COPY %s FROM stdin WITH BINARY;\n", tablename);
 
         if (!noop)
             write (fileno(ofd), copy_buf, strlen(copy_buf));   // header string
