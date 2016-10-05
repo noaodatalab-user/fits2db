@@ -457,6 +457,10 @@ main (int argc, char **argv)
         fprintf (stderr, "Error: binary mode only supported for 'postgres'\n");
         return (ERR);
     }
+    if (do_binary && !explode && format == TAB_POSTGRES) {
+        do_binary = 0;
+    }
+
     if (rows) {
         fprintf (stderr, "Warning: 'rows' option not yet implemented, skipping\n");
         return (ERR);
@@ -1056,7 +1060,7 @@ dl_getOutputCols (fitsfile *fptr, int firstcol, int lastcol)
         if (format == TAB_IPAC)
             strcpy (ocol->coltype, "integer");
         else if (format == TAB_POSTGRES)
-            strcpy (ocol->coltype, "serial");
+            strcpy (ocol->coltype, "serial primary key");
         numOutCols++;
     }
 
