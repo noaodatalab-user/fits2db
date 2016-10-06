@@ -47,7 +47,7 @@
  *      --dbname=<name>          create DB of the given name
  *      --create                 create DB table from input table structure
  *      --truncate               truncate DB table before loading
- *      --id=<colname>           create a serial ID column named <colname>
+ *      --pkey=<colname>         create a serial ID column named <colname>
  *
  *
  *  @file       fits2db.c
@@ -83,6 +83,7 @@
 #define SZ_LINEBUF              10240
 #define SZ_PATH                 512
 #define SZ_FNAME                256
+#define SZ_VALBUF               256
 
 #define PARG_ERR                -512000000
 
@@ -159,6 +160,7 @@ char   *expr            = NULL;         // selection expression string
 char   *tablename       = NULL;         // database table name
 char   *idname          = NULL;         // serial ID column name
 char   *dbname          = NULL;         // database name name (MySQL create)
+char   *addname         = NULL;         // column name to be added
 
 char    delimiter       = DEF_DELIMITER;// default to CSV
 char    quote_char      = DEF_QUOTE;    // string quote character
@@ -248,6 +250,7 @@ static struct option long_opts[] = {
     { "create",       no_argument,          NULL,   '7'},
     { "truncate",     no_argument,          NULL,   '8'},
     { "id",           required_argument,    NULL,   '9'},
+    { "add",          required_argument,    NULL,   'A'},
     { "dbname",       required_argument,    NULL,   'D'},
 
     { NULL,           0,                    0,       0 }
@@ -286,6 +289,7 @@ static unsigned char *dl_printLong (unsigned char *dp, ColPtr col);
 static unsigned char *dl_printFloat (unsigned char *dp, ColPtr col);
 static unsigned char *dl_printDouble (unsigned char *dp, ColPtr col);
 static void           dl_printSerial (void);
+static void           dl_printValue (int value);
 
 static int dl_atoi (char *v);
 static int dl_isFITS (char *v);
@@ -398,8 +402,9 @@ main (int argc, char **argv)
 	    case '6':  do_drop++, do_create++;          break;  // --drop
 	    case '7':  do_create++;                     break;  // --create
 	    case '8':  do_truncate++;                   break;  // --truncate
-	    case '9':  idname = strdup (optval);        break;  // --id
+	    case '9':  idname = strdup (optval);        break;  // --pkey
 	    case 'D':  dbname = strdup (optval);        break;  // --dbname
+	    case 'A':  addname = strdup (optval);       break;  // --add
 
 	    default:
 		fprintf (stderr, "Invalid option '%s'\n", optval);
@@ -423,7 +428,8 @@ main (int argc, char **argv)
             do_create, do_drop, do_truncate);
         fprintf (stderr, "extnum=%d  extname='%s' rows='%s' expr='%s'\n",
             extnum, extname, rows, expr);
-        fprintf (stderr, "delimiter='%c'\n", delimiter);
+        fprintf (stderr, "delimiter='%c' dbname='%s' idname='%s'\n",
+            delimiter, dbname, idname);
         fprintf (stderr, "table = '%s'\n", (tablename ? tablename : "<none>"));
         for (i=0; i < nfiles; i++)
              fprintf (stderr, "in[%d] = '%s'\n", i, ifstart[i]);
@@ -436,35 +442,22 @@ main (int argc, char **argv)
      */
     if (iname && *ifstart == NULL)
         *ifstart = *iflist = iname;
-
     if (*ifstart == NULL) {
         dl_error (2, "no input files specified", NULL);
         return (ERR);
     }
-
     if (extnum >= 0 && extname) {
         dl_error (3, "Only one of 'extname' or 'extnum' may be specified\n",
             NULL);
         return (ERR);
     }
-
-    if (format == TAB_MYSQL && do_create && dbname == NULL) {
-        fprintf (stderr, 
-            "Error: database name must be specified for --create option\n");
-        return (ERR);
-    }
-    if (do_binary && format != TAB_POSTGRES) {
-        fprintf (stderr, "Error: binary mode only supported for 'postgres'\n");
-        return (ERR);
-    }
-    if (do_binary && !explode && format == TAB_POSTGRES) {
-        do_binary = 0;
-    }
-
     if (rows) {
-        fprintf (stderr, "Warning: 'rows' option not yet implemented, skipping\n");
+        fprintf (stderr,
+            "Warning: 'rows' option not yet implemented, skipping\n");
         return (ERR);
     }
+    if (do_binary)
+        bundle = 1;
 
 
     /*  Generate the output file lists if needed.
@@ -498,7 +491,7 @@ main (int argc, char **argv)
 
     } else {
         char ofname[SZ_PATH], ifname[SZ_PATH];
-        int  ndigits = (int) log10 (nfiles) + 1, bnum = 0;;
+        int  ndigits = (int) log10 (nfiles) + 1, bnum = 0;
 
 
         if (debug) {
@@ -692,6 +685,25 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
                 else if (format == TAB_IPAC)
                     dl_printIPACTypes (iname, fptr, firstcol, lastcol, ofd);
                 else {
+                    int c = 0;
+
+                    /*  Binary mode is only supported for Postgres, and not
+                     *  for array operations.  Disable if needed but issue
+                     *  a warning.
+                     */
+                    if (do_binary) {
+                        for (c=firstcol; c <= lastcol; c++) {
+                            ColPtr col = (ColPtr) &inColumns[c];
+                            if (col->type != TSTRING && col->repeat > 1) {
+                                fprintf (stderr, "Warning: binary mode not "
+                                    "supported for array columns, disabling\n");
+                                fflush (stderr);
+                                do_binary = 0;
+                                break;
+                            }
+                        }
+                    }
+
                     // This is some sort of SQL output.
                     if (do_create)
                         dl_createSQLTable (tablename, fptr, firstcol, lastcol,
@@ -724,7 +736,7 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
              *  COPY/INSERT statement.  This helps avoid memory problems in
              *  the database clients we write to.
              */
-            if (bnum == 0 && format != TAB_DELIMITED && format != TAB_IPAC)
+            if (bnum == 0 && TAB_DBTYPE(format))
                 dl_printSQLHdr (tablename, fptr, firstcol, lastcol, ofd);
 
 
@@ -777,7 +789,8 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
                             dl_printHdrString (tablename);
                     }
                 
-
+                    /*  Print all the columns in the table.
+                     */
                     for (i=firstcol; i <= ncols; i++)
                         dp = dl_printCol (dp, &inColumns[i], 
                                     (i < ncols ? delimiter : '\n'));
@@ -794,7 +807,7 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
                     }
 
                     if (! do_binary)
-                    *optr++ = '\n', olen++;     // terminate the row
+                        *optr++ = '\n', olen++;     // terminate the row
                 }
                 write (fileno(ofd), obuf, olen);
                 fflush (ofd);
@@ -808,18 +821,23 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
 
             /*  Terminate the output stream.
              */
-            if ((concat && filenum == (nfiles-1)) || bnum == (bundle-1)) {
-                if (format == TAB_POSTGRES) {
-                    short  eof = -1;
-                    optr = obuf, olen = 0;
+            if ((concat && filenum == (nfiles-1)) || 
+                (bnum > 0 && bnum == (bundle-1))) {
 
+                if (format == TAB_POSTGRES) {
+                    optr = obuf, olen = 0;
+//fprintf (stderr, "writing EOF  f=%d nf=%d  bn=%d bun=%d\n",
+//        filenum, nfiles, bnum, bundle);
                     memset (optr, 0, nbytes);
-                    if (do_binary)
+                    if (do_binary) {
+                        short  eof = -1;
                         memcpy (optr, &eof, sz_short),   olen += sz_short;
-                    else
+                    } else
                         memcpy (optr, "\\.\n", 3),       olen += 3;
+
                     write (fileno(ofd), obuf, olen);
                     fflush (ofd);
+
                 } else if (format == TAB_MYSQL || format == TAB_SQLITE) {
                     write (fileno(ofd), ";\n" , 2);
                     fflush (ofd);
@@ -934,8 +952,8 @@ dl_validateColInfo (fitsfile *fptr, int firstcol, int lastcol)
         memset (keyword, 0, FLEN_KEYWORD);
         fits_make_keyn ("TTYPE", i, keyword, &status);
         fits_read_key (fptr, TSTRING, keyword, col->colname, NULL, &status);
-        fits_get_coltype (fptr, i, &col->type, &col->repeat,
-            &col->width, &status);
+        fits_get_coltype (fptr, i, &col->type, &col->repeat, &col->width,
+            &status);
 
         col->ndim = 1;				// default dimensions
         col->nrows = 1;
@@ -982,7 +1000,7 @@ dl_validateColInfo (fitsfile *fptr, int firstcol, int lastcol)
      *  so we process the input file correctly.
      */
     if (status == 0)
-        memcpy (&inColumns[0], &newColumns[0], (numCols * sizeof (Col)));
+        memcpy (&inColumns[0], &newColumns[0], ((numCols + 1) * sizeof (Col)));
 
     return (status);                                    // No error
 }
@@ -1050,6 +1068,16 @@ dl_getOutputCols (fitsfile *fptr, int firstcol, int lastcol)
     }
 
 
+    /*  Add a column to the output table.  For now, assume it's an integer
+     *  column we'll default to a zero value.
+     */
+    if (addname) {
+        ocol = (ColPtr) &outColumns[++numOutCols];
+        memset (ocol->colname, 0, SZ_COLNAME);
+        strcpy (ocol->colname, addname);
+        strcpy (ocol->coltype, "integer");
+    }
+
     /*  If we're creating a serial ID column, add it to the output list.
      */
     if (idname) {
@@ -1059,8 +1087,26 @@ dl_getOutputCols (fitsfile *fptr, int firstcol, int lastcol)
 
         if (format == TAB_IPAC)
             strcpy (ocol->coltype, "integer");
-        else if (format == TAB_POSTGRES)
-            strcpy (ocol->coltype, "serial primary key");
+        else if (format == TAB_POSTGRES) {
+            /*  For the serial ID column we need to create it as a simple
+             *  integer column to allow for parallel ingests of large
+             *  catalogs or numbers of files.  Once the table is fully
+             *  ingested the column type can be changed to a 'serial' type
+             *  using the commands:
+             *
+             *     CREATE SEQUENCE <id_seq>;
+             *     ALTER TABLE <table> ALTER COLUMN <id>
+             *          SET DEFAULT nextval('<id_seq>'::regclass);
+             *
+             *  Once created, a sequence can be reset (e.g. when rows are
+             *  deleted or re-ordered) with the commands:
+             *
+             *     ALTER SEQUENCE <seq> RESTART [ WITH <start_num> ];
+             *     UPDATE <table> set <id_column> = DEFAULT;
+             */
+            strcpy (ocol->coltype, "integer");
+            //strcpy (ocol->coltype, "serial primary key");
+        }
         numOutCols++;
     }
 
@@ -1180,7 +1226,7 @@ dl_createSQLTable (char *tablename, fitsfile *fptr, int firstcol, int lastcol,
 
                     
     if (do_drop)
-        fprintf (ofd, "DROP TABLE IF EXISTS %s;\n", tablename);
+        fprintf (ofd, "DROP TABLE IF EXISTS %s CASCADE;\n", tablename);
                         
     fprintf (ofd, "CREATE TABLE IF NOT EXISTS %s (\n", tablename);
 
@@ -1294,7 +1340,7 @@ static char *
 dl_SQLType (ColPtr col)
 {
     static char *type = NULL;
-    static char tbuf[64];
+    static char tbuf[SZ_VALBUF];
 
 
     switch (col->type) {
@@ -1328,7 +1374,7 @@ dl_SQLType (ColPtr col)
     default:        fprintf (stderr, "Error: unsupported type %d\n", col->type);
     }
 
-    memset (tbuf, 0, 64);
+    memset (tbuf, 0, SZ_VALBUF);
     if (!explode && col->repeat > 1 && col->type != TSTRING)
         sprintf (tbuf, "%s[%ld]", type, col->repeat);
     else
@@ -1472,10 +1518,25 @@ dl_printCol (unsigned char *dp, ColPtr col, char end_char)
         if ((format == TAB_MYSQL || format == TAB_SQLITE))
             *optr++ = ')', olen++;
     }
-
-    if (format != TAB_POSTGRES && end_char == '\n' && idname) {
-        *optr++ = delimiter, olen++;     // append the comma or newline
-        dl_printSerial ();
+    
+    /*  For Postgres binary output where we've specified a serial value, add
+     *  it to the output stream at the end of a row.  For text formats, add
+     *  it as the last column of data.
+     */
+    if (end_char == '\n') {
+        if (addname) {
+            if (!do_binary)
+                *optr++ = delimiter, olen++;     // append the comma or newline
+            dl_printValue (1);
+        }
+        if (idname) {
+            if (format == TAB_POSTGRES && do_binary) {
+                dl_printSerial ();
+            } else if ((format == TAB_DELIMITED || format == TAB_IPAC)) {
+                *optr++ = delimiter, olen++;     // append the comma or newline
+                dl_printSerial ();
+            }
+        }
     }
 
     if (!do_binary && end_char != '\n')
@@ -1505,7 +1566,9 @@ dl_printString (unsigned char *dp, ColPtr col)
 
         memset (buf, 0, SZ_TXTBUF);
         memcpy (buf, dp, col->repeat);
-        len = strlen ((bp = sstrip(buf)));
+        //len = strlen ((bp = sstrip(buf)));
+        len = strlen ((bp = buf));
+//fprintf (stderr, "STR:  '%s'  rep=%d  len=%d\n", buf, col->repeat, len);
         val = htonl (len);
 
         memcpy (optr, &val, sz_int);            optr += sz_int;
@@ -1545,7 +1608,7 @@ static unsigned char *
 dl_printLogical (unsigned char *dp, ColPtr col)
 {
     char ch;
-    char  valbuf[8 * col->repeat];
+    char  valbuf[SZ_VALBUF];
     int   i, j, len = 0;
 
 
@@ -1583,7 +1646,7 @@ dl_printLogical (unsigned char *dp, ColPtr col)
     } else {
         for (i=1; i <= col->nrows; i++) {
             for (j=1; j <= col->ncols; j++) {
-                memset (valbuf, 0, 8 * col->repeat);
+                memset (valbuf, 0, SZ_VALBUF);
 
                 ch = (char) *dp++;
                 if (format == TAB_IPAC)
@@ -1614,7 +1677,7 @@ dl_printByte (unsigned char *dp, ColPtr col)
 {
     char ch;
     unsigned char uch;
-    char  valbuf[4 * col->repeat];
+    char  valbuf[SZ_VALBUF];
     int   i, j, len = 0;
 
 
@@ -1649,7 +1712,7 @@ dl_printByte (unsigned char *dp, ColPtr col)
     } else {
         for (i=1; i <= col->nrows; i++) {
             for (j=1; j <= col->ncols; j++) {
-                memset (valbuf, 0, 4 * col->repeat);
+                memset (valbuf, 0, SZ_VALBUF);
                 if (col->type == TBYTE) {
                     uch = (unsigned char) *dp++;
                     if (format == TAB_IPAC)
@@ -1686,7 +1749,7 @@ dl_printShort (unsigned char *dp, ColPtr col)
 {
     short sval = 0.0;
     unsigned short usval = 0.0;
-    char  valbuf[8 * col->repeat];
+    char  valbuf[SZ_VALBUF];
     int   i, j, len = 0;
 
 
@@ -1718,7 +1781,7 @@ dl_printShort (unsigned char *dp, ColPtr col)
     } else {
         for (i=1; i <= col->nrows; i++) {
             for (j=1; j <= col->ncols; j++) {
-                memset (valbuf, 0, 8 * col->repeat);
+                memset (valbuf, 0, SZ_VALBUF);
                 if (col->type == TUSHORT) {
                     memcpy (&usval, dp, sz_short);
                     if (format == TAB_IPAC)
@@ -1756,7 +1819,7 @@ dl_printInt (unsigned char *dp, ColPtr col)
 {
     int   ival = 0.0;
     unsigned int uival = 0.0;
-    char  valbuf[64 * col->repeat];
+    char  valbuf[SZ_VALBUF];
     int   i, j, len = 0;
 
 
@@ -1788,7 +1851,7 @@ dl_printInt (unsigned char *dp, ColPtr col)
     } else {
         for (i=1; i <= col->nrows; i++) {
             for (j=1; j <= col->ncols; j++) {
-                memset (valbuf, 0, 64 * col->repeat);
+                memset (valbuf, 0, SZ_VALBUF);
                 if (col->type == TUINT) {
                     memcpy (&uival, dp, sz_int);
                     if (format == TAB_IPAC)
@@ -1825,7 +1888,7 @@ static unsigned char *
 dl_printLong (unsigned char *dp, ColPtr col)
 {
     long  lval = 0.0;
-    char  valbuf[64 * col->repeat];
+    char  valbuf[SZ_VALBUF];
     int   i, j, len = 0;
 
 
@@ -1859,7 +1922,7 @@ dl_printLong (unsigned char *dp, ColPtr col)
     } else {
         for (i=1; i <= col->nrows; i++) {
             for (j=1; j <= col->ncols; j++) {
-                memset (valbuf, 0, 64 * col->repeat);
+                memset (valbuf, 0, SZ_VALBUF);
                 memcpy (&lval, dp, sz_long);
                 if (format == TAB_IPAC)
                     sprintf (valbuf, "%*ld", col->dispwidth, lval);
@@ -1888,7 +1951,7 @@ static unsigned char *
 dl_printFloat (unsigned char *dp, ColPtr col)
 {
     float rval = 0.0;
-    char  valbuf[64 * col->repeat];
+    char  valbuf[SZ_VALBUF];
     int   i, j, sign = 1, len = 0;
 
 
@@ -1920,7 +1983,7 @@ dl_printFloat (unsigned char *dp, ColPtr col)
     } else {
         for (i=1; i <= col->nrows; i++) {
             for (j=1; j <= col->ncols; j++) {
-                memset (valbuf, 0, 64 * col->repeat);
+                memset (valbuf, 0, SZ_VALBUF);
                 memcpy (&rval, dp, sz_float);
 
                 if (isnan (rval) ) {
@@ -1978,7 +2041,7 @@ static unsigned char *
 dl_printDouble (unsigned char *dp, ColPtr col)
 {
     double dval = 0.0;
-    char  valbuf[64 * col->repeat];
+    char  valbuf[SZ_VALBUF];
     int   i, j, sign = 1, len = 0;
 
 
@@ -2010,7 +2073,7 @@ dl_printDouble (unsigned char *dp, ColPtr col)
     } else {
         for (i=1; i <= col->nrows; i++) {
             for (j=1; j <= col->ncols; j++) {
-                memset (valbuf, 0, 64 * col->repeat);
+                memset (valbuf, 0, SZ_VALBUF);
                 memcpy (&dval, dp, sizeof(double));
 
                 if (isnan (dval) ) {
@@ -2067,27 +2130,46 @@ dl_printDouble (unsigned char *dp, ColPtr col)
 static void
 dl_printSerial (void)
 {
-    unsigned int ival = 0;
-    char  valbuf[64];
-    int   len = 0;
+    unsigned int len, ival = serial_number++;
+    unsigned int sz_val = htonl(sz_int);
+    char  valbuf[SZ_VALBUF];
 
-
-    if (mach_swap && !do_binary)
-        bswap4 ((char *)&ival, 1, (char *)&ival, 1, sz_int);
 
     if (do_binary) {
-        unsigned int sz_val = sz_val = htonl(sz_int);
-    
         memcpy (optr, &sz_val, sz_int);         optr += sz_int;
-        ival = htonl(serial_number++);
+        ival = htonl(ival);
         memcpy (optr, (char *)&ival, sz_int);   optr += sz_int;
         olen += (2 * sz_int);
 
     } else {
+        memset (valbuf, 0, SZ_VALBUF);
+        sprintf (valbuf, "%d", ival);
+        memcpy (optr, valbuf, (len = strlen (valbuf)));
+        olen += len;
+        optr += len;
+    }
+}
 
-        memset (valbuf, 0, 64);
 
-        ival = serial_number++;
+/**
+ *  DL_PRINTVALUE -- Print a (integer) value to the output stream.
+ */
+static void
+dl_printValue (int value)
+{
+    unsigned int len, ival = value;
+    unsigned int sz_val = htonl(sz_int);
+    char  valbuf[SZ_VALBUF];
+
+
+    if (do_binary) {
+        memcpy (optr, &sz_val, sz_int);         optr += sz_int;
+        ival = htonl(ival);
+        memcpy (optr, (char *)&ival, sz_int);   optr += sz_int;
+        olen += (2 * sz_int);
+
+    } else {
+        memset (valbuf, 0, SZ_VALBUF);
         sprintf (valbuf, "%d", ival);
         memcpy (optr, valbuf, (len = strlen (valbuf)));
         olen += len;
@@ -2707,7 +2789,7 @@ Usage (void)
 "      --dbname=<name>          create DB of the given name\n"
 "      --create                 create DB table from input table structure\n"
 "      --truncate               truncate DB table before loading\n"
-"      --id=<colname>           create a serial ID column named <colname>\n"
+"      --pkey=<colname>         create a serial primary key column <colname>\n"
 "\n"
 "\n"
 "  Examples:\n"
