@@ -171,7 +171,7 @@ int     mach_swap       = 0;            // is machine swapped relative to FITS?
 int     do_binary       = 0;            // do binary SQL output
 int     do_quote        = 1;            // quote ascii values?
 int     do_escape       = 0;            // escape strings for quotes?
-int     do_strip        = 0;            // strip leading/trailing whitespace?
+int     do_strip        = 1;            // strip leading/trailing whitespace?
 int     do_drop         = 0;            // drop db table before creating new one
 int     do_create       = 0;            // create new db table
 int     do_truncate     = 0;            // truncate db table before load
@@ -371,7 +371,7 @@ main (int argc, char **argv)
 	    case 'X':  explode++;			break;  // --explode
 	    case 'H':  header = 0;			break;  // --noheader
 	    case 'Q':  do_quote = 0;			break;  // --noquote
-	    case 'N':  do_strip = 0;			break;  // --strip
+	    case 'N':  do_strip = 0;			break;  // --nostrip
 	    case 'O':  do_oids = 0;			break;  // --oid
 	    case 'Z':  do_load = 0;			break;  // --noload
 	    case 'S':  quote_char = '\'';		break;  // --quote
@@ -1686,7 +1686,7 @@ dl_printByte (unsigned char *dp, ColPtr col)
         short sval = 0;
         if (explode) {
             len = sz_short;
-            sz_val = htonl(sz_short);
+            sz_val = htons(sz_short);
             for (i=1; i <= col->nrows; i++) {
                 for (j=1; j <= col->ncols; j++) {
                     memcpy (optr, &sz_val, sz_int);     optr += sz_int;
@@ -1697,7 +1697,7 @@ dl_printByte (unsigned char *dp, ColPtr col)
             }
         } else {
             len = col->repeat * sz_short;
-            sz_val = htonl(col->repeat * sz_short);
+            sz_val = htons(col->repeat * sz_short);
             memcpy (optr, &sz_val, sz_int);             optr += sz_int;
             olen += sz_int;
 
