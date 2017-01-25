@@ -1686,24 +1686,24 @@ dl_printByte (unsigned char *dp, ColPtr col)
         short sval = 0;
         if (explode) {
             len = sz_short;
-            sz_val = htons(sz_short);
+            sz_val = htonl(sz_short);
             for (i=1; i <= col->nrows; i++) {
                 for (j=1; j <= col->ncols; j++) {
                     memcpy (optr, &sz_val, sz_int);     optr += sz_int;
-                    sval = (short) *dp++;
+                    sval = htons((short) *dp++);
                     memcpy (optr, &sval, sz_short);     optr += sz_short;
                     olen += sz_int + len;
                 }
             }
         } else {
             len = col->repeat * sz_short;
-            sz_val = htons(col->repeat * sz_short);
+            sz_val = htonl(col->repeat * sz_short);
             memcpy (optr, &sz_val, sz_int);             optr += sz_int;
             olen += sz_int;
 
             for (i=1; i <= col->nrows; i++) {
                 for (j=1; j <= col->ncols; j++) {
-                    sval = (short) *dp++;
+                    sval = htons((short) *dp++);
                     memcpy (optr, &sval, sz_short);     optr += sz_short;
                     olen += sz_short;
                 }
