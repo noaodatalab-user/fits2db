@@ -1692,7 +1692,7 @@ dl_printByte (unsigned char *dp, ColPtr col)
             for (i=1; i <= col->nrows; i++) {
                 for (j=1; j <= col->ncols; j++) {
                     memcpy (optr, &sz_val, sz_int);     optr += sz_int;
-                    sval = (short) *dp++;
+                    sval = htons((short) *dp++);
                     memcpy (optr, &sval, sz_short);     optr += sz_short;
                     olen += sz_int + len;
                 }
@@ -1705,7 +1705,7 @@ dl_printByte (unsigned char *dp, ColPtr col)
 
             for (i=1; i <= col->nrows; i++) {
                 for (j=1; j <= col->ncols; j++) {
-                    sval = (short) *dp++;
+                    sval = htons((short) *dp++);
                     memcpy (optr, &sval, sz_short);     optr += sz_short;
                     olen += sz_short;
                 }
