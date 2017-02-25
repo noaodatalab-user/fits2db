@@ -171,7 +171,7 @@ int     mach_swap       = 0;            // is machine swapped relative to FITS?
 int     do_binary       = 0;            // do binary SQL output
 int     do_quote        = 1;            // quote ascii values?
 int     do_escape       = 0;            // escape strings for quotes?
-int     do_strip        = 0;            // strip leading/trailing whitespace?
+int     do_strip        = 1;            // strip leading/trailing whitespace?
 int     do_drop         = 0;            // drop db table before creating new one
 int     do_create       = 0;            // create new db table
 int     do_truncate     = 0;            // truncate db table before load
@@ -371,7 +371,7 @@ main (int argc, char **argv)
 	    case 'X':  explode++;			break;  // --explode
 	    case 'H':  header = 0;			break;  // --noheader
 	    case 'Q':  do_quote = 0;			break;  // --noquote
-	    case 'N':  do_strip = 0;			break;  // --strip
+	    case 'N':  do_strip = 0;			break;  // --nostrip
 	    case 'O':  do_oids = 0;			break;  // --oid
 	    case 'Z':  do_load = 0;			break;  // --noload
 	    case 'S':  quote_char = '\'';		break;  // --quote
@@ -407,7 +407,8 @@ main (int argc, char **argv)
 	    case 'A':  addname = strdup (optval);       break;  // --add
 
 	    default:
-		fprintf (stderr, "Invalid option '%s'\n", optval);
+		fprintf (stderr, "%s: Invalid option '%s'\n", 
+					prog_name, optval);
 		return (ERR);
 	    }
 
@@ -618,12 +619,12 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
     fitsfile *fptr = (fitsfile *) NULL;
     int   status = 0;
     long  jj, nrows;
-    int   hdunum, hdutype, ncols, ii, i, j;
+    int   hdunum, hdutype, ncols, i, j;
     int   firstcol = 1, lastcol = 0, firstrow = 1;
     int   nelem, chunk = chunk_size;
 
     FILE  *ofd = (FILE *) NULL;
-    ColPtr col = (ColPtr) NULL;
+    //ColPtr col = (ColPtr) NULL;
 
     unsigned char *data = NULL, *dp = NULL;
     long   naxis1, rowsize = 0, nbytes = 0, firstchar = 1, totrows = 0;
@@ -849,9 +850,10 @@ dl_fits2db (char *iname, char *oname, int filenum, int bnum, int nfiles)
              */
             if (data) free ((char *) data);
             if (obuf) free ((void *) obuf);
-            for (ii = firstcol; ii <= lastcol; ii++) {
-                col = (ColPtr) &inColumns[ii];
-            }
+            //for (ii = firstcol; ii <= lastcol; ii++) {
+            //    col = (ColPtr) &inColumns[ii];
+            //    free ((void *) col);
+            //}
 
             /*  Close the output file.
              */
@@ -1479,7 +1481,7 @@ dl_printCol (unsigned char *dp, ColPtr col, char end_char)
 
     case TINT:                          // TFORM='J'    32-bit integer
     case TUINT:                         // TFORM='V'    unsigned 32-bit integer
-    case TINT32BIT:                     // TFORM='K'    signed 32-bit integer
+    case TINT32BIT:                     // TFORM='J'    signed 32-bit integer
         dp = dl_printInt (dp, col);
         break;
 
@@ -1893,9 +1895,9 @@ dl_printLong (unsigned char *dp, ColPtr col)
 
 
     if (mach_swap && !do_binary)
-        //bswap8 ((char *)dp, 1, (char *)dp, 1, sizeof(long) * col->repeat);
+        bswap8 ((char *)dp, 1, (char *)dp, 1, sizeof(long) * col->repeat);
         // FIXME -- We're in trouble if we comes across a 64-bit int column
-        bswap4 ((char *)dp, 1, (char *)dp, 1, sz_long * col->repeat);
+        //bswap4 ((char *)dp, 1, (char *)dp, 1, sz_long * col->repeat);
 
     if (do_binary) {
         unsigned int sz_val = 0;
@@ -2210,12 +2212,12 @@ dl_makeTableName (char *fname)
 static void
 dl_escapeCSV (char* in)
 {
-    int   in_len = 0;
+    //int   in_len = 0;
     char *ip = in, *op = esc_buf;
 
     memset (esc_buf, 0, SZ_ESCBUF);
-    if (in)
-        in_len = strlen (in);
+    //if (in)
+    //    in_len = strlen (in);
 
     *op++ = quote_char;
     for ( ; *ip; ip++) {
