@@ -380,16 +380,27 @@ main (int argc, char **argv)
 	    case 'i':  iname = strdup (optval);		break;  // --input
 	    case 'o':  oname = strdup (optval);		break;  // --output
 
-	    case '0':  delimiter = ' ';			break;  // ASV
-	    case '1':  delimiter = '|';			break;  // BSV
-	    case '2':  delimiter = ',';			break;  // CSV
-	    case '3':  delimiter = '\t';		break;  // TSV
+	    case '0':  delimiter = ' ';
+                       arr_delimiter=' ';
+                       break;  // ASV
+	    case '1':  delimiter = '|';
+                       arr_delimiter='|';
+                       break;  // BSV
+	    case '2':  delimiter = ',';
+                       arr_delimiter=',';
+                       break;  // CSV
+	    case '3':  delimiter = '\t';
+                       arr_delimiter='\t';
+                       break;  // TSV
 	    case '4':  delimiter = '|'; 
-                       format = TAB_IPAC; 	        break;
+                       format = TAB_IPAC;
+                       arr_delimiter='|';
+                       break;
 
 	    case '5':  if (optval[0] == 'm') {          // MySQL ouptut
                             format = TAB_MYSQL;
                             delimiter = ',';
+                            arr_delimiter = ',';
                             do_quote = 1;
                             quote_char = '"';
                        } else if (optval[0] == 's') {  // MySQL ouptut
@@ -397,6 +408,7 @@ main (int argc, char **argv)
                        } else {                        // default to Postgres
                             format = TAB_POSTGRES;
                             delimiter = '\t';
+                            arr_delimiter = ',';
                             do_quote = 0;
                        }
                        break;
