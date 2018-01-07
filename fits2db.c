@@ -1870,7 +1870,7 @@ dl_printInt (unsigned char *dp, ColPtr col)
     int   i, j, len = 0;
 
 
-    if (mach_swap && !do_binary)
+    if (mach_swap && do_binary)
         bswap4 ((char *)dp, 1, (char *)dp, 1, sz_int * col->repeat);
 
     if (do_binary) {
@@ -1939,7 +1939,7 @@ dl_printLong (unsigned char *dp, ColPtr col)
     int   i, j, len = 0;
 
 
-    if (mach_swap && !do_binary)
+    if (mach_swap && do_binary)
         bswap8 ((char *)dp, 1, (char *)dp, 1, sizeof(long) * col->repeat);
         // FIXME -- We're in trouble if we comes across a 64-bit int column
         //bswap4 ((char *)dp, 1, (char *)dp, 1, sz_long * col->repeat);
@@ -2002,7 +2002,7 @@ dl_printFloat (unsigned char *dp, ColPtr col)
     int   i, j, sign = 1, len = 0;
 
 
-    if (mach_swap && !do_binary)
+    if (mach_swap && do_binary)
         bswap4 ((char *)dp, 1, (char *)dp, 1, sz_float * col->repeat);
 
     if (do_binary) {
@@ -2181,6 +2181,8 @@ dl_printSerial (void)
     unsigned int sz_val = htonl(sz_int);
     char  valbuf[SZ_VALBUF];
 
+    if (mach_swap && do_binary)
+        bswap4 ((unsigned char *)&ival, 1, (unsigned char *)&ival, 1, sz_int);
 
     if (do_binary) {
         memcpy (optr, &sz_val, sz_int);         	optr += sz_int;
@@ -2200,7 +2202,7 @@ dl_printSerial (void)
 
 
 /**
- *  DL_PRINTSERIAL -- Print the serial number column as integer values.
+ *  DL_PRINTRANDOM -- Print the random number column as float values.
  */
 static void
 dl_printRandom (void)
@@ -2210,7 +2212,11 @@ dl_printRandom (void)
     char  valbuf[SZ_VALBUF];
 
 
+    if (mach_swap && do_binary)
+        bswap4 ((unsigned char *)&rval, 1, (unsigned char *)&rval, 1, sz_float);
+
     if (do_binary) {
+        sz_val = htonl(sz_float);
         memcpy (optr, &sz_val, sz_int);           	optr += sz_int;
         memcpy (optr, (char *)&rval, sz_float);   	optr += sz_float;
         olen += (sz_int + sz_float);
