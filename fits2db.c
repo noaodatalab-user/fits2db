@@ -42,9 +42,13 @@
  *      -t,--table=<name>        create table named <name>
  *      -Z,--noload              don't create table load commands
  *
+ *      --add=<colname>          Add the nameed column (needs type info)
  *      --sql=<db>               output SQL correct for <db> type
  *      --drop                   drop existing DB table before conversion
  *      --dbname=<name>          create DB of the given name
+ *      --sid=<colname>          add a sequential-ID column (integer)
+ *      --rid=<colname>          add a random-ID column (float: 0.0 -> 100.0)
+ *
  *      --create                 create DB table from input table structure
  *      --truncate               truncate DB table before loading
  *      --pkey=<colname>         create a serial ID column named <colname>
@@ -59,8 +63,9 @@
  */
 
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <time.h>
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
@@ -87,6 +92,8 @@
 
 #define PARG_ERR                -512000000
 
+#define RANDOM_SCALE		100.0		// scale for random numbers
+
 #ifndef OK
 #define OK                      0
 #endif
@@ -101,11 +108,11 @@
 #endif
 
 //  Output Format Codes
-#define TAB_DELIMITED           000               // delimited ascii table
-#define TAB_IPAC                001               // IPAC table format
-#define TAB_POSTGRES            002               // SQL -- PostgreSQL
-#define TAB_MYSQL               004               // SQL -- MySQL
-#define TAB_SQLITE              010               // SQL -- SQLite
+#define TAB_DELIMITED           000             // delimited ascii table
+#define TAB_IPAC                001             // IPAC table format
+#define TAB_POSTGRES            002             // SQL -- PostgreSQL
+#define TAB_MYSQL               004             // SQL -- MySQL
+#define TAB_SQLITE              010             // SQL -- SQLite
 
 #define TAB_DBTYPE(t)           (t>TAB_IPAC)
 
@@ -158,7 +165,8 @@ char   *basename        = NULL;         // base output file name
 char   *rows            = NULL;         // row selection string
 char   *expr            = NULL;         // selection expression string
 char   *tablename       = NULL;         // database table name
-char   *idname          = NULL;         // serial ID column name
+char   *sidname         = NULL;         // serial ID column name
+char   *ridname         = NULL;         // random ID column name
 char   *dbname          = NULL;         // database name name (MySQL create)
 char   *addname         = NULL;         // column name to be added
 
@@ -212,7 +220,7 @@ size_t  sz_double       = sizeof (double);
 static Task  self       = {  "fits2db",  fits2db,  0,  0,  0  };
  */
 
-static char  *opts 	= "hdvnbc:e:E:i:o:r:s:t:BCHNOQSXZ012345:6789:D:";
+static char  *opts 	= "hdvnb:c:e:E:i:o:r:s:t:BCHNOQSXZ012345:678L:U:A:D:";
 static struct option long_opts[] = {
     { "help",         no_argument,          NULL,   'h'},
     { "debug",        no_argument,          NULL,   'd'},
@@ -249,7 +257,8 @@ static struct option long_opts[] = {
     { "drop",         no_argument,          NULL,   '6'},
     { "create",       no_argument,          NULL,   '7'},
     { "truncate",     no_argument,          NULL,   '8'},
-    { "id",           required_argument,    NULL,   '9'},
+    { "sid",          required_argument,    NULL,   'L'},
+    { "rid",          required_argument,    NULL,   'U'},
     { "add",          required_argument,    NULL,   'A'},
     { "dbname",       required_argument,    NULL,   'D'},
 
@@ -289,6 +298,7 @@ static unsigned char *dl_printLong (unsigned char *dp, ColPtr col);
 static unsigned char *dl_printFloat (unsigned char *dp, ColPtr col);
 static unsigned char *dl_printDouble (unsigned char *dp, ColPtr col);
 static void           dl_printSerial (void);
+static void           dl_printRandom (void);
 static void           dl_printValue (int value);
 
 static int dl_atoi (char *v);
@@ -333,6 +343,11 @@ main (int argc, char **argv)
      */
     ifstart = calloc (argc, sizeof (char *));
     iflist = ifstart;
+
+
+    /*  Initialize the randome number generator.
+     */
+    srand ((unsigned int)time(NULL));
 
 
     /*  Parse the argument list.  The use of dl_paramInit() is required to
@@ -391,9 +406,9 @@ main (int argc, char **argv)
                             delimiter = ',';
                             do_quote = 1;
                             quote_char = '"';
-                       } else if (optval[0] == 's') {  // MySQL ouptut
+                       } else if (optval[0] == 's') {   // MySQL ouptut
                            format = TAB_SQLITE;
-                       } else {                        // default to Postgres
+                       } else {                         // default to Postgres
                             format = TAB_POSTGRES;
                             delimiter = '\t';
                             do_quote = 0;
@@ -402,7 +417,8 @@ main (int argc, char **argv)
 	    case '6':  do_drop++, do_create++;          break;  // --drop
 	    case '7':  do_create++;                     break;  // --create
 	    case '8':  do_truncate++;                   break;  // --truncate
-	    case '9':  idname = strdup (optval);        break;  // --pkey
+	    case 'L':  sidname = strdup (optval);       break;  // --sid
+	    case 'U':  ridname = strdup (optval);       break;  // --rid
 	    case 'D':  dbname = strdup (optval);        break;  // --dbname
 	    case 'A':  addname = strdup (optval);       break;  // --add
 
@@ -429,8 +445,8 @@ main (int argc, char **argv)
             do_create, do_drop, do_truncate);
         fprintf (stderr, "extnum=%d  extname='%s' rows='%s' expr='%s'\n",
             extnum, extname, rows, expr);
-        fprintf (stderr, "delimiter='%c' dbname='%s' idname='%s'\n",
-            delimiter, dbname, idname);
+        fprintf (stderr, "delimiter='%c' dbname='%s' sidname='%s' ridname='%s'\n",
+            delimiter, dbname, sidname, ridname);
         fprintf (stderr, "table = '%s'\n", (tablename ? tablename : "<none>"));
         for (i=0; i < nfiles; i++)
              fprintf (stderr, "in[%d] = '%s'\n", i, ifstart[i]);
@@ -1082,10 +1098,10 @@ dl_getOutputCols (fitsfile *fptr, int firstcol, int lastcol)
 
     /*  If we're creating a serial ID column, add it to the output list.
      */
-    if (idname) {
+    if (sidname) {
         ocol = (ColPtr) &outColumns[numOutCols+1];
         memset (ocol->colname, 0, SZ_COLNAME);
-        strcpy (ocol->colname, idname);
+        strcpy (ocol->colname, sidname);
 
         if (format == TAB_IPAC)
             strcpy (ocol->coltype, "integer");
@@ -1111,6 +1127,19 @@ dl_getOutputCols (fitsfile *fptr, int firstcol, int lastcol)
         }
         numOutCols++;
     }
+
+    /*  If we're creating a serial ID column, add it to the output list.
+     */
+    if (ridname) {
+        ocol = (ColPtr) &outColumns[numOutCols+1];
+        memset (ocol->colname, 0, SZ_COLNAME);
+        strcpy (ocol->colname, ridname);
+
+        if (format == TAB_IPAC || format == TAB_POSTGRES) 
+            strcpy (ocol->coltype, "real");
+        numOutCols++;
+    }
+
 
     if (debug) {
         fprintf (stderr, "Output Columns [%d]:\n", numOutCols);
@@ -1142,9 +1171,9 @@ dl_printHdr (int firstcol, int lastcol, FILE *ofd)
     /*  If we're using a serial ID column it isn't included in the data list
      *  since the database fills in the value for us.  So, don't include it in 
      *  the header when doing Postgres. 
-     */
-    if (format == TAB_POSTGRES && idname)
+    if (format == TAB_POSTGRES && sidname)
         ncols--;
+     */
 
     for (i=1; i <= ncols; i++) {           // print column types
         col = (ColPtr) &outColumns[i];
@@ -1531,13 +1560,29 @@ dl_printCol (unsigned char *dp, ColPtr col, char end_char)
                 *optr++ = delimiter, olen++;     // append the comma or newline
             dl_printValue (1);
         }
-        if (idname) {
-            if (format == TAB_POSTGRES && do_binary) {
+        if (sidname) {
+            //if (format == TAB_POSTGRES && do_binary) {
+            if (format == TAB_POSTGRES) {
+		if (!do_binary)
+                    *optr++ = delimiter, olen++; // append the comma or newline
                 dl_printSerial ();
             } else if ((format == TAB_DELIMITED || format == TAB_IPAC)) {
                 *optr++ = delimiter, olen++;     // append the comma or newline
                 dl_printSerial ();
-            }
+            } else
+		printf ("Unsupported serial format\n");
+        }
+        if (ridname) {
+            //if (format == TAB_POSTGRES && do_binary) {
+            if (format == TAB_POSTGRES) {
+		if (!do_binary)
+                    *optr++ = delimiter, olen++; // append the comma or newline
+                dl_printRandom ();
+            } else if ((format == TAB_DELIMITED || format == TAB_IPAC)) {
+                *optr++ = delimiter, olen++;     // append the comma or newline
+                dl_printRandom ();
+            } else
+		printf ("Unsupported random format\n");
         }
     }
 
@@ -1825,7 +1870,7 @@ dl_printInt (unsigned char *dp, ColPtr col)
     int   i, j, len = 0;
 
 
-    if (mach_swap && !do_binary)
+    if (mach_swap && do_binary)
         bswap4 ((char *)dp, 1, (char *)dp, 1, sz_int * col->repeat);
 
     if (do_binary) {
@@ -1894,7 +1939,7 @@ dl_printLong (unsigned char *dp, ColPtr col)
     int   i, j, len = 0;
 
 
-    if (mach_swap && !do_binary)
+    if (mach_swap && do_binary)
         bswap8 ((char *)dp, 1, (char *)dp, 1, sizeof(long) * col->repeat);
         // FIXME -- We're in trouble if we comes across a 64-bit int column
         //bswap4 ((char *)dp, 1, (char *)dp, 1, sz_long * col->repeat);
@@ -1957,7 +2002,7 @@ dl_printFloat (unsigned char *dp, ColPtr col)
     int   i, j, sign = 1, len = 0;
 
 
-    if (mach_swap && !do_binary)
+    if (mach_swap && do_binary)
         bswap4 ((char *)dp, 1, (char *)dp, 1, sz_float * col->repeat);
 
     if (do_binary) {
@@ -2132,20 +2177,54 @@ dl_printDouble (unsigned char *dp, ColPtr col)
 static void
 dl_printSerial (void)
 {
-    unsigned int len, ival = serial_number++;
+    unsigned int len = 0, ival = serial_number++;
     unsigned int sz_val = htonl(sz_int);
     char  valbuf[SZ_VALBUF];
 
+    if (mach_swap && do_binary)
+        bswap4 ((unsigned char *)&ival, 1, (unsigned char *)&ival, 1, sz_int);
 
     if (do_binary) {
-        memcpy (optr, &sz_val, sz_int);         optr += sz_int;
+        memcpy (optr, &sz_val, sz_int);         	optr += sz_int;
         ival = htonl(ival);
-        memcpy (optr, (char *)&ival, sz_int);   optr += sz_int;
+        memcpy (optr, (char *)&ival, sz_int);   	optr += sz_int;
         olen += (2 * sz_int);
 
     } else {
         memset (valbuf, 0, SZ_VALBUF);
+        //sprintf (valbuf, "%c%d", delimiter, ival);
         sprintf (valbuf, "%d", ival);
+        memcpy (optr, valbuf, (len = strlen (valbuf)));
+        olen += len;
+        optr += len;
+    }
+}
+
+
+/**
+ *  DL_PRINTRANDOM -- Print the random number column as float values.
+ */
+static void
+dl_printRandom (void)
+{
+    unsigned int len = 0, sz_val = htonl(sz_float);
+    float rval = (((float)rand()/(float)(RAND_MAX)) * RANDOM_SCALE);
+    char  valbuf[SZ_VALBUF];
+
+
+    if (mach_swap && do_binary)
+        bswap4 ((unsigned char *)&rval, 1, (unsigned char *)&rval, 1, sz_float);
+
+    if (do_binary) {
+        sz_val = htonl(sz_float);
+        memcpy (optr, &sz_val, sz_int);           	optr += sz_int;
+        memcpy (optr, (char *)&rval, sz_float);   	optr += sz_float;
+        olen += (sz_int + sz_float);
+
+    } else {
+        memset (valbuf, 0, SZ_VALBUF);
+        //sprintf (valbuf, "%c%f", delimiter, rval);
+        sprintf (valbuf, "%f", rval);
         memcpy (optr, valbuf, (len = strlen (valbuf)));
         olen += len;
         optr += len;
