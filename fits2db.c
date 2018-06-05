@@ -81,8 +81,8 @@
 #define MAX_COLS                1024
 
 #define	SZ_RESBUF	        8192
-#define SZ_COLNAME              32
-#define SZ_EXTNAME              32
+#define SZ_COLNAME              64
+#define SZ_EXTNAME              64
 #define SZ_COLVAL               1024
 #define SZ_ESCBUF               1024
 #define SZ_LINEBUF              10240
@@ -122,7 +122,7 @@
 #define DEF_CHUNK               10000
 #define DEF_ONAME               "root"
 
-#define DEF_FORMAT              TAB_DELIMITED
+#define DEF_FORMAT              TAB_POSTGRES
 #define DEF_DELIMITER           ','
 #define DEF_QUOTE               '"'
 #define DEF_MODE                "w+"
@@ -406,9 +406,9 @@ main (int argc, char **argv)
                             delimiter = ',';
                             do_quote = 1;
                             quote_char = '"';
-                       } else if (optval[0] == 's') {   // MySQL ouptut
+                       } else if (optval[0] == 's') {   // SQLite ouptut
                            format = TAB_SQLITE;
-                       } else {                         // default to Postgres
+                       } else {                         // Postgres (default)
                             format = TAB_POSTGRES;
                             delimiter = '\t';
                             do_quote = 0;
@@ -589,7 +589,12 @@ main (int argc, char **argv)
                     fprintf (stderr, "Processing file: %s\n", ifname);
 
                 if (!noop)
-                    dl_fits2db (ifname, ofname, i, bnum, nfiles);
+		    if (access (ifname, F_OK) == 0)
+                        dl_fits2db (ifname, ofname, i, bnum, nfiles);
+		    else {
+			fprintf (stderr, "Error: Cannot access '%s'\n", ifname);
+			continue;
+		    }
 
                 /* Increment the filenumber within the bundle so we can keep
                  * track of headers.
@@ -1870,7 +1875,7 @@ dl_printInt (unsigned char *dp, ColPtr col)
     int   i, j, len = 0;
 
 
-    if (mach_swap && do_binary)
+    if (mach_swap && !do_binary)
         bswap4 ((char *)dp, 1, (char *)dp, 1, sz_int * col->repeat);
 
     if (do_binary) {
@@ -1939,7 +1944,7 @@ dl_printLong (unsigned char *dp, ColPtr col)
     int   i, j, len = 0;
 
 
-    if (mach_swap && do_binary)
+    if (mach_swap && !do_binary)
         bswap8 ((char *)dp, 1, (char *)dp, 1, sizeof(long) * col->repeat);
         // FIXME -- We're in trouble if we comes across a 64-bit int column
         //bswap4 ((char *)dp, 1, (char *)dp, 1, sz_long * col->repeat);
@@ -2002,7 +2007,7 @@ dl_printFloat (unsigned char *dp, ColPtr col)
     int   i, j, sign = 1, len = 0;
 
 
-    if (mach_swap && do_binary)
+    if (mach_swap && !do_binary)
         bswap4 ((char *)dp, 1, (char *)dp, 1, sz_float * col->repeat);
 
     if (do_binary) {
