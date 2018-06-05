@@ -171,6 +171,7 @@ char   *dbname          = NULL;         // database name name (MySQL create)
 char   *addname         = NULL;         // column name to be added
 
 char    delimiter       = DEF_DELIMITER;// default to CSV
+char	arr_delimiter 	= DEF_DELIMITER;// default to CSV
 char    quote_char      = DEF_QUOTE;    // string quote character
 char   *omode           = DEF_MODE;     // output file mode
 
@@ -394,16 +395,27 @@ main (int argc, char **argv)
 	    case 'i':  iname = strdup (optval);		break;  // --input
 	    case 'o':  oname = strdup (optval);		break;  // --output
 
-	    case '0':  delimiter = ' ';			break;  // ASV
-	    case '1':  delimiter = '|';			break;  // BSV
-	    case '2':  delimiter = ',';			break;  // CSV
-	    case '3':  delimiter = '\t';		break;  // TSV
+	    case '0':  delimiter = ' ';
+                       arr_delimiter=' ';
+                       break;  // ASV
+	    case '1':  delimiter = '|';
+                       arr_delimiter='|';
+                       break;  // BSV
+	    case '2':  delimiter = ',';
+                       arr_delimiter=',';
+                       break;  // CSV
+	    case '3':  delimiter = '\t';
+                       arr_delimiter='\t';
+                       break;  // TSV
 	    case '4':  delimiter = '|'; 
-                       format = TAB_IPAC; 	        break;
+                       format = TAB_IPAC;
+                       arr_delimiter='|';
+                       break;
 
 	    case '5':  if (optval[0] == 'm') {          // MySQL ouptut
                             format = TAB_MYSQL;
                             delimiter = ',';
+                            arr_delimiter = ',';
                             do_quote = 1;
                             quote_char = '"';
                        } else if (optval[0] == 's') {   // SQLite ouptut
@@ -411,6 +423,7 @@ main (int argc, char **argv)
                        } else {                         // Postgres (default)
                             format = TAB_POSTGRES;
                             delimiter = '\t';
+                            arr_delimiter = ',';
                             do_quote = 0;
                        }
                        break;
@@ -1710,10 +1723,10 @@ dl_printLogical (unsigned char *dp, ColPtr col)
                 olen += len;
                 optr += len;
                 if (col->repeat > 1 && j < col->ncols)
-                    *optr++ = delimiter,  olen++;
+                    *optr++ = arr_delimiter,  olen++;
             }
             if (col->repeat > 1 && i < col->nrows)
-                *optr++ = delimiter,  olen++;
+                *optr++ = arr_delimiter,  olen++;
         }
     }
 
@@ -1782,10 +1795,10 @@ dl_printByte (unsigned char *dp, ColPtr col)
                 olen += len;
                 optr += len;
                 if (col->repeat > 1 && j < col->ncols)
-                    *optr++ = delimiter,  olen++;
+                    *optr++ = arr_delimiter,  olen++;
             }
             if (col->repeat > 1 && i < col->nrows)
-                *optr++ = delimiter,  olen++;
+                *optr++ = arr_delimiter,  olen++;
         }
     }
 
@@ -1852,10 +1865,10 @@ dl_printShort (unsigned char *dp, ColPtr col)
                 optr += len;
                 dp += sz_short;
                 if (col->repeat > 1 && j < col->ncols)
-                    *optr++ = delimiter,  olen++;
+                    *optr++ = arr_delimiter,  olen++;
             }
             if (col->repeat > 1 && i < col->nrows)
-                *optr++ = delimiter,  olen++;
+                *optr++ = arr_delimiter,  olen++;
         }
     }
 
@@ -1922,10 +1935,10 @@ dl_printInt (unsigned char *dp, ColPtr col)
                 optr += len;
                 dp += sz_int;
                 if (col->repeat > 1 && j < col->ncols)
-                    *optr++ = delimiter,  olen++;
+                    *optr++ = arr_delimiter,  olen++;
             }
             if (col->repeat > 1 && i < col->nrows)
-                *optr++ = delimiter,  olen++;
+                *optr++ = arr_delimiter,  olen++;
         }
     }
 
@@ -1985,10 +1998,10 @@ dl_printLong (unsigned char *dp, ColPtr col)
                 optr += len;
                 dp += sz_long;
                 if (col->repeat > 1 && j < col->ncols)
-                    *optr++ = delimiter,  olen++;
+                    *optr++ = arr_delimiter,  olen++;
             }
             if (col->repeat > 1 && i < col->nrows)
-                *optr++ = delimiter,  olen++;
+                *optr++ = arr_delimiter,  olen++;
         }
     }
 
@@ -2075,10 +2088,10 @@ dl_printFloat (unsigned char *dp, ColPtr col)
                 }
                 dp += sz_float;
                 if (col->repeat > 1 && j < col->ncols)
-                    *optr++ = delimiter,  olen++;
+                    *optr++ = arr_delimiter,  olen++;
             }
             if (col->repeat > 1 && i < col->nrows)
-                *optr++ = delimiter,  olen++;
+                *optr++ = arr_delimiter,  olen++;
         }
     }
 
@@ -2165,10 +2178,10 @@ dl_printDouble (unsigned char *dp, ColPtr col)
                 }
                 dp += sz_double;
                 if (col->repeat > 1 && j < col->ncols)
-                    *optr++ = delimiter,  olen++;
+                    *optr++ = arr_delimiter,  olen++;
             }
             if (col->repeat > 1 && i < col->nrows)
-                *optr++ = delimiter,  olen++;
+                *optr++ = arr_delimiter,  olen++;
         }
     }
 
